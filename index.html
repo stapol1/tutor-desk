@@ -357,6 +357,13 @@ tr.row-click:hover{background:#faf5e8;cursor:pointer;}
 </div>
 
 <script>
+// ============================================================
+// TUTOR DESK CONFIGURATION — Edit this section with your credentials
+// ============================================================
+const TUTOR_DESK_CONFIG = {
+  supabaseUrl: 'https://anboynojtnuctbuztjlm.supabase.co',
+  supabaseAnonKey: 'https://stapol1.github.io/tutor-desk/' // your anon/publishable key
+};
 /* ============================================================
    SUPABASE CONNECTION
    ============================================================ */
@@ -370,7 +377,11 @@ function initSupabaseClient(url, key){
   sb = supabase.createClient(url, key, { auth: { persistSession: true, autoRefreshToken: true } });
 }
 async function ensureConnected(){
-  const cfg = getSupabaseConfig();
+  let cfg = getSupabaseConfig();
+  if(!cfg && TUTOR_DESK_CONFIG.supabaseUrl && TUTOR_DESK_CONFIG.supabaseAnonKey){
+    // Use hardcoded config if available
+    cfg = { url: TUTOR_DESK_CONFIG.supabaseUrl, key: TUTOR_DESK_CONFIG.supabaseAnonKey };
+  }
   if(!cfg){
     document.getElementById('setupScreen').style.display = 'flex';
     return false;
