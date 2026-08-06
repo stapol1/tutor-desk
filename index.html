@@ -378,11 +378,15 @@ function initSupabaseClient(url, key){
   sb = supabase.createClient(url, key, { auth: { persistSession: true, autoRefreshToken: true } });
 }
 async function ensureConnected(){
-  let cfg = getSupabaseConfig();
-  if(!cfg && TUTOR_DESK_CONFIG.supabaseUrl && TUTOR_DESK_CONFIG.supabaseAnonKey){
-    // Use hardcoded config if available
-    cfg = { url: TUTOR_DESK_CONFIG.supabaseUrl, key: TUTOR_DESK_CONFIG.supabaseAnonKey };
+  // Hardcoded config takes priority
+  if(TUTOR_DESK_CONFIG.supabaseUrl && TUTOR_DESK_CONFIG.supabaseAnonKey){
+    initSupabaseClient(TUTOR_DESK_CONFIG.supabaseUrl, TUTOR_DESK_CONFIG.supabaseAnonKey);
+    document.getElementById('setupScreen').style.display = 'none';
+    return true;
   }
+  
+  // Fall back to localStorage if available
+  const cfg = getSupabaseConfig();
   if(!cfg){
     document.getElementById('setupScreen').style.display = 'flex';
     return false;
@@ -1873,6 +1877,4 @@ function renderStudentDetail(){
     <button class="btn btn-ghost" id="backToStudents">&larr; Back to students</button>
     <h3 style="color:var(--aegean);margin:14px 0 2px;">${esc(studentLabel(s))}</h3>
     <div class="legend">
-      <span><span class="sw" style="background:var(--green);"></span>Attended</span>
-      <span><span class="sw" style="background:var(--red);"></span>Unattended</span>
- 
+      <span><span class="sw" style="background:var
