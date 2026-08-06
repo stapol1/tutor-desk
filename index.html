@@ -362,7 +362,7 @@ tr.row-click:hover{background:#faf5e8;cursor:pointer;}
 // ============================================================
 const TUTOR_DESK_CONFIG = {
   supabaseUrl: 'https://anboynojtnuctbuztjlm.supabase.co',
-  supabaseAnonKey: 'https://stapol1.github.io/tutor-desk/' // your anon/publishable key
+  supabaseAnonKey: 'YOUR_ACTUAL_SUPABASE_ANON_KEY_HERE' // paste your eyJ... key here
 };
 /* ============================================================
    SUPABASE CONNECTION
@@ -378,8 +378,8 @@ function initSupabaseClient(url, key){
 }
 async function ensureConnected(){
   let cfg = getSupabaseConfig();
-  if(!cfg && TUTOR_DESK_CONFIG.supabaseUrl && TUTOR_DESK_CONFIG.supabaseAnonKey){
-    // Use hardcoded config if available
+  if(!cfg && TUTOR_DESK_CONFIG.supabaseUrl && TUTOR_DESK_CONFIG.supabaseAnonKey && TUTOR_DESK_CONFIG.supabaseAnonKey !== 'YOUR_ACTUAL_SUPABASE_ANON_KEY_HERE'){
+    // Use hardcoded config if available and not default placeholder
     cfg = { url: TUTOR_DESK_CONFIG.supabaseUrl, key: TUTOR_DESK_CONFIG.supabaseAnonKey };
   }
   if(!cfg){
@@ -588,9 +588,6 @@ function setSaveStatus(state){
   } else el.innerHTML = '';
 }
 
-// Only one write is ever in flight at a time. If a new save is requested while one is
-// already running, it's queued and re-runs with the latest data once the first finishes —
-// this avoids overlapping storage.set calls, which is what triggers errors during rapid clicking.
 async function flushSave(){
   if(_saveTimer){ clearTimeout(_saveTimer); _saveTimer = null; }
   if(_saveInFlight){ _saveQueued = true; return; }
@@ -607,7 +604,7 @@ async function flushSave(){
   }
   return result;
 }
-// Debounced: coalesces rapid successive edits (e.g. fast attendance clicking) into one write.
+
 function saveDB(){
   setSaveStatus('saving');
   if(_saveTimer) clearTimeout(_saveTimer);
@@ -628,7 +625,7 @@ function totalCharged(student){
   let sum = 0;
   DB.lessons.forEach(l=>{
     if(l.greyed) return;
-    if(l.type==='Group') return; // group students are charged per-cycle, see groupCharges
+    if(l.type==='Group') return;
     if(!l.studentIds.includes(student.id)) return;
     const att = l.attendance[student.id];
     if(att==='attended' || att==='unattended'){
@@ -706,9 +703,8 @@ function lessonTitleText(l){
    ============================================================ */
 async function initAuth(){
   const connected = await ensureConnected();
-  if(!connected) return; // setup screen is showing; setupBtn calls initAuth() again once connected
+  if(!connected) return;
 
-  // Handle a password-recovery link landing back on the site
   sb.auth.onAuthStateChange((event, session)=>{
     if(event === 'PASSWORD_RECOVERY'){ renderLogin('recover'); }
   });
@@ -823,7 +819,6 @@ function renderLogin(mode){
       if(error){ err.textContent = 'Incorrect email or password.'; return; }
       AUTH = { email: data.user.email, id: data.user.id };
       await loadDB();
-      // one-time upload of a backup that was restored before email confirmation completed
       try{
         const pending = sessionStorage.getItem('td-pending-restore');
         if(pending){
@@ -1281,7 +1276,7 @@ function renderScheduler(){
 function renderMonthView(){
   const y = CAL_DATE.getFullYear(), m = CAL_DATE.getMonth();
   const first = new Date(y,m,1);
-  const startOffset = (first.getDay()+6)%7; // Monday start
+  const startOffset = (first.getDay()+6)%7;
   const daysInMonth = new Date(y,m+1,0).getDate();
   const monthLabel = CAL_DATE.toLocaleDateString(undefined,{month:'long', year:'numeric'});
   const todayKey = dateKey(new Date());
@@ -1367,11 +1362,11 @@ function renderDayPanel(key){
 }
 
 /* ---------- Weekly diary ---------- */
-let WEEK_START_MIN = 8*60;   // 08:00, adjustable via +/- controls
-let WEEK_END_MIN = 21*60;    // 21:00, adjustable via +/- controls
-let WEEK_ZOOM = window.innerWidth <= 600 ? 0.6 : 1; // start a bit more compact on phones; still user-adjustable
+let WEEK_START_MIN = 8*60;
+let WEEK_END_MIN = 21*60;
+let WEEK_ZOOM = window.innerWidth <= 600 ? 0.6 : 1;
 const SLOT_MIN = 30;
-const BASE_SLOT_PX = 102; // sized so a 1-hour block fits ~8 students without scrolling
+const BASE_SLOT_PX = 102;
 function slotPx(){ return Math.round(BASE_SLOT_PX * WEEK_ZOOM); }
 function wkMinColPx(){ return window.innerWidth <= 420 ? 82 : (window.innerWidth <= 600 ? 96 : 110); }
 function calcSlotStartTime(dayBodyEl, clientY){
@@ -1393,8 +1388,6 @@ async function maybePropagateLessonMove(lesson, origDate, origTime){
   }
 }
 
-// Shared move logic — used by both desktop mouse drag-and-drop and the touch-friendly
-// tap-to-move system, so behavior (charging, series prompts) is identical either way.
 async function commitStudentMove(studentId, srcLessonId, destLessonId){
   if(srcLessonId === destLessonId) return;
   const dest = DB.lessons.find(l=>l.id===destLessonId);
@@ -1456,7 +1449,6 @@ async function commitLessonMove(lessonId, newDate, newTime){
   await maybePropagateLessonMove(lesson, origDate, origTime);
 }
 
-// Tap-to-move: touch-friendly alternative to drag-and-drop (native HTML5 drag doesn't work on touchscreens)
 function armStudentMove(studentId, srcLessonId){
   const st = DB.students.find(x=>x.id===studentId);
   TAP_MOVE = {type:'student', studentId, srcLessonId: srcLessonId||null};
@@ -1694,7 +1686,6 @@ function openLessonModal(key, lessonId, prefillTime){
       return;
     }
 
-    // existing lesson: capture originals, apply edits, then offer series-wide propagation
     const origType = l.type, origTime = l.time, origDuration = l.duration;
     const origStudentIds = l.studentIds.slice();
     const newStudents = ids.filter(id=>!origStudentIds.includes(id));
@@ -1887,7 +1878,6 @@ function renderStudentDetail(){
 function bindContentEvents(){
   const c = document.getElementById('content');
 
-  // students view
   const addBtn = document.getElementById('addStudentBtn');
   if(addBtn) addBtn.onclick = ()=>openStudentModal(null);
   const search = document.getElementById('studentSearch');
@@ -1914,7 +1904,6 @@ function bindContentEvents(){
     toast('Next cycle charged');
   });
 
-  // scheduler
   const prevM = document.getElementById('prevMonth'), nextM = document.getElementById('nextMonth'), todayBtn = document.getElementById('todayBtn');
   if(prevM) prevM.onclick = ()=>{ CAL_DATE = new Date(CAL_DATE.getFullYear(), CAL_DATE.getMonth()-1, 1); render(); };
   if(nextM) nextM.onclick = ()=>{ CAL_DATE = new Date(CAL_DATE.getFullYear(), CAL_DATE.getMonth()+1, 1); render(); };
@@ -1926,12 +1915,10 @@ function bindContentEvents(){
   if(addLessonBtn) addLessonBtn.onclick = ()=>openLessonModal(OPEN_DAY, null);
   c.querySelectorAll('[data-edit-lesson]').forEach(b=> b.onclick = (e)=>{ e.stopPropagation(); openLessonModal(OPEN_DAY, b.dataset.editLesson); });
 
-  // scheduler: month/week toggle + side panel
   c.querySelectorAll('[data-sched-mode]').forEach(b=> b.onclick = ()=>{ SCHED_MODE = b.dataset.schedMode; render(); });
   const spToggle = document.getElementById('toggleSidePanel');
   if(spToggle) spToggle.onclick = ()=>{ SIDE_PANEL_OPEN = !SIDE_PANEL_OPEN; render(); };
 
-  // scheduler: week view navigation
   const prevWk = document.getElementById('prevWeek'), nextWk = document.getElementById('nextWeek'), todayWk = document.getElementById('todayBtnWk');
   if(prevWk) prevWk.onclick = ()=>{ CAL_DATE = addDays(CAL_DATE,-7); render(); };
   if(nextWk) nextWk.onclick = ()=>{ CAL_DATE = addDays(CAL_DATE,7); render(); };
@@ -1948,7 +1935,7 @@ function bindContentEvents(){
   if(zoomIn) zoomIn.onclick = ()=>{ WEEK_ZOOM = Math.min(4.0, Math.round((WEEK_ZOOM+0.2)*10)/10); render(); };
   c.querySelectorAll('[data-toggle-day]').forEach(chip=> chip.onclick = ()=>{
     const i = Number(chip.dataset.toggleDay);
-    if(VISIBLE_DAYS[i] && VISIBLE_DAYS.filter(Boolean).length<=1) return; // keep at least one day visible
+    if(VISIBLE_DAYS[i] && VISIBLE_DAYS.filter(Boolean).length<=1) return;
     VISIBLE_DAYS[i] = !VISIBLE_DAYS[i];
     render();
   });
@@ -1957,7 +1944,6 @@ function bindContentEvents(){
   const toggleShowNotes = document.querySelector('[data-toggle-show-notes]');
   if(toggleShowNotes) toggleShowNotes.onclick = ()=>{ SHOW_NOTES_WK = !SHOW_NOTES_WK; render(); };
 
-  // scheduler: week view - click empty slot to add a lesson at that time (or complete a tap-move)
   c.querySelectorAll('[data-week-add]').forEach(body=>{
     body.onclick = async (e)=>{
       if(e.target.closest('.wk-block')) return;
@@ -1985,7 +1971,6 @@ function bindContentEvents(){
       await commitLessonMove(lesson.id, body.dataset.weekAdd, calcSlotStartTime(body, e.clientY));
     };
   });
-  // scheduler: week view - drag a whole lesson block to reschedule it
   c.querySelectorAll('[data-drag-lesson-block]').forEach(block=>{
     block.ondragstart = (e)=>{
       DRAG_LESSON = { lessonId: block.dataset.dragLessonBlock };
@@ -1993,7 +1978,6 @@ function bindContentEvents(){
       e.stopPropagation();
     };
   });
-  // scheduler: week view - click a block to edit it
   c.querySelectorAll('[data-edit-lesson-wk]').forEach(b=> b.onclick = (e)=>{
     e.stopPropagation();
     const l = DB.lessons.find(x=>x.id===b.dataset.editLessonWk);
@@ -2040,14 +2024,12 @@ function bindContentEvents(){
     render(); saveDB();
   });
 
-  // drag and drop between lesson cards
   c.querySelectorAll('[data-drag-student]').forEach(chip=>{
     chip.ondragstart = (e)=>{
       DRAG_INFO = {studentId: chip.dataset.dragStudent, lessonId: chip.dataset.dragLesson};
       e.dataTransfer.effectAllowed = 'move';
       e.stopPropagation();
     };
-    // touch-friendly alternative: tap a student to arm a move, then tap a lesson to place them
     chip.addEventListener('click', (e)=>{
       e.stopPropagation();
       const studentId = chip.dataset.dragStudent;
@@ -2077,7 +2059,6 @@ function bindContentEvents(){
       await commitStudentMove(DRAG_INFO.studentId, DRAG_INFO.lessonId, destId);
       DRAG_INFO = null;
     };
-    // tap-to-move: tapping a lesson card/block completes a pending move
     card.addEventListener('click', async (e)=>{
       if(!TAP_MOVE) return;
       const destId = card.dataset.lessonDrop;
@@ -2097,7 +2078,6 @@ function bindContentEvents(){
     }, true);
   });
 
-  // reports
   c.querySelectorAll('[data-toggle-field]').forEach(t=> t.onclick = ()=>{
     const id = t.dataset.toggleField;
     if(REPORT_FIELDS_ON.has(id)) REPORT_FIELDS_ON.delete(id); else REPORT_FIELDS_ON.add(id);
@@ -2134,7 +2114,6 @@ function bindContentEvents(){
     render();
   };
 
-  // student detail
   const backBtn = document.getElementById('backToStudents');
   if(backBtn) backBtn.onclick = ()=> setView(STUDENT_DETAIL_SOURCE_VIEW);
   c.querySelectorAll('[data-detail-mode]').forEach(b=> b.onclick = ()=>{ STUDENT_DETAIL_MODE = b.dataset.detailMode; render(); });
