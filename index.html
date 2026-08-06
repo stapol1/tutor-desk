@@ -357,13 +357,14 @@ tr.row-click:hover{background:#faf5e8;cursor:pointer;}
 </div>
 
 <script>
-// ============================================================
-// TUTOR DESK CONFIGURATION — Edit this section with your credentials
-// ============================================================
+/* ============================================================
+   TUTOR DESK CONFIGURATION — Edit this section with your credentials
+   ============================================================ */
 const TUTOR_DESK_CONFIG = {
   supabaseUrl: 'https://anboynojtnuctbuztjlm.supabase.co',
-  supabaseAnonKey: 'YOUR_ACTUAL_SUPABASE_ANON_KEY_HERE' // paste your eyJ... key here
+  supabaseAnonKey: 'sb_publishable_7-pgsXYoYgmV1Ufqzy0WCQ_GB-xrrEP'
 };
+
 /* ============================================================
    SUPABASE CONNECTION
    ============================================================ */
@@ -378,8 +379,8 @@ function initSupabaseClient(url, key){
 }
 async function ensureConnected(){
   let cfg = getSupabaseConfig();
-  if(!cfg && TUTOR_DESK_CONFIG.supabaseUrl && TUTOR_DESK_CONFIG.supabaseAnonKey && TUTOR_DESK_CONFIG.supabaseAnonKey !== 'YOUR_ACTUAL_SUPABASE_ANON_KEY_HERE'){
-    // Use hardcoded config if available and not default placeholder
+  if(!cfg && TUTOR_DESK_CONFIG.supabaseUrl && TUTOR_DESK_CONFIG.supabaseAnonKey){
+    // Use hardcoded config if available
     cfg = { url: TUTOR_DESK_CONFIG.supabaseUrl, key: TUTOR_DESK_CONFIG.supabaseAnonKey };
   }
   if(!cfg){
@@ -588,6 +589,9 @@ function setSaveStatus(state){
   } else el.innerHTML = '';
 }
 
+// Only one write is ever in flight at a time. If a new save is requested while one is
+// already running, it's queued and re-runs with the latest data once the first finishes —
+// this avoids overlapping storage.set calls, which is what triggers errors during rapid clicking.
 async function flushSave(){
   if(_saveTimer){ clearTimeout(_saveTimer); _saveTimer = null; }
   if(_saveInFlight){ _saveQueued = true; return; }
@@ -604,7 +608,7 @@ async function flushSave(){
   }
   return result;
 }
-
+// Debounced: coalesces rapid successive edits (e.g. fast attendance clicking) into one write.
 function saveDB(){
   setSaveStatus('saving');
   if(_saveTimer) clearTimeout(_saveTimer);
@@ -625,7 +629,7 @@ function totalCharged(student){
   let sum = 0;
   DB.lessons.forEach(l=>{
     if(l.greyed) return;
-    if(l.type==='Group') return;
+    if(l.type==='Group') return; // group students are charged per-cycle, see groupCharges
     if(!l.studentIds.includes(student.id)) return;
     const att = l.attendance[student.id];
     if(att==='attended' || att==='unattended'){
@@ -703,8 +707,9 @@ function lessonTitleText(l){
    ============================================================ */
 async function initAuth(){
   const connected = await ensureConnected();
-  if(!connected) return;
+  if(!connected) return; // setup screen is showing; setupBtn calls initAuth() again once connected
 
+  // Handle a password-recovery link landing back on the site
   sb.auth.onAuthStateChange((event, session)=>{
     if(event === 'PASSWORD_RECOVERY'){ renderLogin('recover'); }
   });
@@ -816,9 +821,15 @@ function renderLogin(mode){
       const err = document.getElementById('loginErr');
       err.style.color = '';
       const { data, error } = await sb.auth.signInWithPassword({ email: u, password: p });
-      if(error){ err.textContent = 'Incorrect email or password.'; return; }
+      if(error){ 
+        const errorMsg = error.message || JSON.stringify(error);
+        err.textContent = 'Error: ' + errorMsg;
+        console.log('Login error:', error);
+        return; 
+      }
       AUTH = { email: data.user.email, id: data.user.id };
       await loadDB();
+      // one-time upload of a backup that was restored before email confirmation completed
       try{
         const pending = sessionStorage.getItem('td-pending-restore');
         if(pending){
@@ -1276,7 +1287,7 @@ function renderScheduler(){
 function renderMonthView(){
   const y = CAL_DATE.getFullYear(), m = CAL_DATE.getMonth();
   const first = new Date(y,m,1);
-  const startOffset = (first.getDay()+6)%7;
+  const startOffset = (first.getDay()+6)%7; // Monday start
   const daysInMonth = new Date(y,m+1,0).getDate();
   const monthLabel = CAL_DATE.toLocaleDateString(undefined,{month:'long', year:'numeric'});
   const todayKey = dateKey(new Date());
@@ -1362,11 +1373,11 @@ function renderDayPanel(key){
 }
 
 /* ---------- Weekly diary ---------- */
-let WEEK_START_MIN = 8*60;
-let WEEK_END_MIN = 21*60;
-let WEEK_ZOOM = window.innerWidth <= 600 ? 0.6 : 1;
+let WEEK_START_MIN = 8*60;   // 08:00, adjustable via +/- controls
+let WEEK_END_MIN = 21*60;    // 21:00, adjustable via +/- controls
+let WEEK_ZOOM = window.innerWidth <= 600 ? 0.6 : 1; // start a bit more compact on phones; still user-adjustable
 const SLOT_MIN = 30;
-const BASE_SLOT_PX = 102;
+const BASE_SLOT_PX = 102; // sized so a 1-hour block fits ~8 students without scrolling
 function slotPx(){ return Math.round(BASE_SLOT_PX * WEEK_ZOOM); }
 function wkMinColPx(){ return window.innerWidth <= 420 ? 82 : (window.innerWidth <= 600 ? 96 : 110); }
 function calcSlotStartTime(dayBodyEl, clientY){
@@ -1388,6 +1399,8 @@ async function maybePropagateLessonMove(lesson, origDate, origTime){
   }
 }
 
+// Shared move logic — used by both desktop mouse drag-and-drop and the touch-friendly
+// tap-to-move system, so behavior (charging, series prompts) is identical either way.
 async function commitStudentMove(studentId, srcLessonId, destLessonId){
   if(srcLessonId === destLessonId) return;
   const dest = DB.lessons.find(l=>l.id===destLessonId);
@@ -1449,6 +1462,7 @@ async function commitLessonMove(lessonId, newDate, newTime){
   await maybePropagateLessonMove(lesson, origDate, origTime);
 }
 
+// Tap-to-move: touch-friendly alternative to drag-and-drop (native HTML5 drag doesn't work on touchscreens)
 function armStudentMove(studentId, srcLessonId){
   const st = DB.students.find(x=>x.id===studentId);
   TAP_MOVE = {type:'student', studentId, srcLessonId: srcLessonId||null};
@@ -1686,6 +1700,7 @@ function openLessonModal(key, lessonId, prefillTime){
       return;
     }
 
+    // existing lesson: capture originals, apply edits, then offer series-wide propagation
     const origType = l.type, origTime = l.time, origDuration = l.duration;
     const origStudentIds = l.studentIds.slice();
     const newStudents = ids.filter(id=>!origStudentIds.includes(id));
@@ -1860,274 +1875,4 @@ function renderStudentDetail(){
     <div class="legend">
       <span><span class="sw" style="background:var(--green);"></span>Attended</span>
       <span><span class="sw" style="background:var(--red);"></span>Unattended</span>
-      <span><span class="sw" style="background:var(--blue);"></span>Skipped</span>
-    </div>
-    <div class="preset-row">
-      <button class="btn ${STUDENT_DETAIL_MODE==='list'?'btn-primary':'btn-ghost'}" data-detail-mode="list">List view</button>
-      <button class="btn ${STUDENT_DETAIL_MODE==='calendar'?'btn-primary':'btn-ghost'}" data-detail-mode="calendar">Calendar view</button>
-    </div>
-    ${STUDENT_DETAIL_MODE==='list' ?
-      `<table><thead><tr><th>Date</th><th>Time</th><th>Type</th><th>Status</th></tr></thead><tbody>${listRows || `<tr><td colspan="4" class="empty-note" style="padding:18px;">No lessons yet.</td></tr>`}</tbody></table>`
-      : calHtml}
-  `;
-}
-
-/* ============================================================
-   EVENT BINDING
-   ============================================================ */
-function bindContentEvents(){
-  const c = document.getElementById('content');
-
-  const addBtn = document.getElementById('addStudentBtn');
-  if(addBtn) addBtn.onclick = ()=>openStudentModal(null);
-  const search = document.getElementById('studentSearch');
-  if(search) search.oninput = ()=>{
-    const q = search.value.toLowerCase();
-    document.querySelectorAll('#studentsTbody tr[data-open-student]').forEach(tr=>{
-      tr.style.display = tr.textContent.toLowerCase().includes(q) ? '' : 'none';
-    });
-  };
-  c.querySelectorAll('[data-open-student]').forEach(tr=>{
-    tr.onclick = ()=>{
-      if(CURRENT_VIEW==='reports'){ STUDENT_DETAIL_ID = tr.dataset.openStudent; STUDENT_DETAIL_MODE='calendar'; STUDENT_DETAIL_SOURCE_VIEW='reports'; setView('studentDetail'); }
-      else { STUDENT_DETAIL_SOURCE_VIEW='students'; openStudentModal(tr.dataset.openStudent); }
-    };
-  });
-  c.querySelectorAll('[data-charge-cycle]').forEach(b=> b.onclick = async (e)=>{
-    e.stopPropagation();
-    const s = DB.students.find(x=>x.id===b.dataset.chargeCycle);
-    if(!s) return;
-    pushUndo();
-    s.groupCharges = s.groupCharges || [];
-    s.groupCharges.push({amount: Number(s.costPerUnit)||0, date: dateKey(new Date())});
-    render(); saveDB();
-    toast('Next cycle charged');
-  });
-
-  const prevM = document.getElementById('prevMonth'), nextM = document.getElementById('nextMonth'), todayBtn = document.getElementById('todayBtn');
-  if(prevM) prevM.onclick = ()=>{ CAL_DATE = new Date(CAL_DATE.getFullYear(), CAL_DATE.getMonth()-1, 1); render(); };
-  if(nextM) nextM.onclick = ()=>{ CAL_DATE = new Date(CAL_DATE.getFullYear(), CAL_DATE.getMonth()+1, 1); render(); };
-  if(todayBtn) todayBtn.onclick = ()=>{ CAL_DATE = new Date(); render(); };
-  c.querySelectorAll('.cal-cell[data-day]').forEach(cell=>{
-    cell.onclick = ()=>{ OPEN_DAY = cell.dataset.day; render(); };
-  });
-  const addLessonBtn = document.getElementById('addLessonBtn');
-  if(addLessonBtn) addLessonBtn.onclick = ()=>openLessonModal(OPEN_DAY, null);
-  c.querySelectorAll('[data-edit-lesson]').forEach(b=> b.onclick = (e)=>{ e.stopPropagation(); openLessonModal(OPEN_DAY, b.dataset.editLesson); });
-
-  c.querySelectorAll('[data-sched-mode]').forEach(b=> b.onclick = ()=>{ SCHED_MODE = b.dataset.schedMode; render(); });
-  const spToggle = document.getElementById('toggleSidePanel');
-  if(spToggle) spToggle.onclick = ()=>{ SIDE_PANEL_OPEN = !SIDE_PANEL_OPEN; render(); };
-
-  const prevWk = document.getElementById('prevWeek'), nextWk = document.getElementById('nextWeek'), todayWk = document.getElementById('todayBtnWk');
-  if(prevWk) prevWk.onclick = ()=>{ CAL_DATE = addDays(CAL_DATE,-7); render(); };
-  if(nextWk) nextWk.onclick = ()=>{ CAL_DATE = addDays(CAL_DATE,7); render(); };
-  if(todayWk) todayWk.onclick = ()=>{ CAL_DATE = new Date(); render(); };
-
-  const topMinus = document.getElementById('topMinus'), topPlus = document.getElementById('topPlus');
-  const bottomMinus = document.getElementById('bottomMinus'), bottomPlus = document.getElementById('bottomPlus');
-  const zoomOut = document.getElementById('zoomOut'), zoomIn = document.getElementById('zoomIn');
-  if(topMinus) topMinus.onclick = ()=>{ if(WEEK_END_MIN-(WEEK_START_MIN+60) >= 120){ WEEK_START_MIN += 60; render(); } };
-  if(topPlus) topPlus.onclick = ()=>{ if(WEEK_START_MIN-60 >= 0){ WEEK_START_MIN -= 60; render(); } };
-  if(bottomMinus) bottomMinus.onclick = ()=>{ if((WEEK_END_MIN-60)-WEEK_START_MIN >= 120){ WEEK_END_MIN -= 60; render(); } };
-  if(bottomPlus) bottomPlus.onclick = ()=>{ if(WEEK_END_MIN+60 <= 24*60){ WEEK_END_MIN += 60; render(); } };
-  if(zoomOut) zoomOut.onclick = ()=>{ WEEK_ZOOM = Math.max(0.4, Math.round((WEEK_ZOOM-0.2)*10)/10); render(); };
-  if(zoomIn) zoomIn.onclick = ()=>{ WEEK_ZOOM = Math.min(4.0, Math.round((WEEK_ZOOM+0.2)*10)/10); render(); };
-  c.querySelectorAll('[data-toggle-day]').forEach(chip=> chip.onclick = ()=>{
-    const i = Number(chip.dataset.toggleDay);
-    if(VISIBLE_DAYS[i] && VISIBLE_DAYS.filter(Boolean).length<=1) return;
-    VISIBLE_DAYS[i] = !VISIBLE_DAYS[i];
-    render();
-  });
-  const toggleShowStudents = document.querySelector('[data-toggle-show-students]');
-  if(toggleShowStudents) toggleShowStudents.onclick = ()=>{ SHOW_STUDENTS_WK = !SHOW_STUDENTS_WK; render(); };
-  const toggleShowNotes = document.querySelector('[data-toggle-show-notes]');
-  if(toggleShowNotes) toggleShowNotes.onclick = ()=>{ SHOW_NOTES_WK = !SHOW_NOTES_WK; render(); };
-
-  c.querySelectorAll('[data-week-add]').forEach(body=>{
-    body.onclick = async (e)=>{
-      if(e.target.closest('.wk-block')) return;
-      const key = body.dataset.weekAdd;
-      if(TAP_MOVE && TAP_MOVE.type==='lesson'){
-        const time = calcSlotStartTime(body, e.clientY);
-        const lessonId = TAP_MOVE.lessonId;
-        cancelTapMove();
-        await commitLessonMove(lessonId, key, time);
-        return;
-      }
-      if(TAP_MOVE && TAP_MOVE.type==='student'){
-        toast('Tap a lesson block to place the student there');
-        return;
-      }
-      openLessonModal(key, null, calcSlotStartTime(body, e.clientY));
-    };
-    body.ondragover = (e)=>{ if(DRAG_LESSON) e.preventDefault(); };
-    body.ondrop = async (e)=>{
-      if(!DRAG_LESSON) return;
-      e.preventDefault();
-      const lesson = DB.lessons.find(x=>x.id===DRAG_LESSON.lessonId);
-      DRAG_LESSON = null;
-      if(!lesson) return;
-      await commitLessonMove(lesson.id, body.dataset.weekAdd, calcSlotStartTime(body, e.clientY));
-    };
-  });
-  c.querySelectorAll('[data-drag-lesson-block]').forEach(block=>{
-    block.ondragstart = (e)=>{
-      DRAG_LESSON = { lessonId: block.dataset.dragLessonBlock };
-      e.dataTransfer.effectAllowed = 'move';
-      e.stopPropagation();
-    };
-  });
-  c.querySelectorAll('[data-edit-lesson-wk]').forEach(b=> b.onclick = (e)=>{
-    e.stopPropagation();
-    const l = DB.lessons.find(x=>x.id===b.dataset.editLessonWk);
-    if(l) openLessonModal(l.date, l.id);
-  });
-  c.querySelectorAll('[data-del-lesson]').forEach(b=> b.onclick = async (e)=>{
-    e.stopPropagation();
-    const delId = b.dataset.delLesson;
-    if(await showConfirm('Delete this lesson?', 'Delete', 'Cancel')){
-      pushUndo();
-      DB.lessons = DB.lessons.filter(l=>l.id!==delId);
-      render(); saveDB();
-    }
-  });
-  c.querySelectorAll('[data-toggle-grey]').forEach(b=> b.onclick = async (e)=>{
-    e.stopPropagation();
-    const l = DB.lessons.find(x=>x.id===b.dataset.toggleGrey);
-    pushUndo();
-    l.greyed = !l.greyed;
-    render(); saveDB();
-  });
-  c.querySelectorAll('[data-toggle-grey-wk]').forEach(b=> b.onclick = async (e)=>{
-    e.stopPropagation();
-    const l = DB.lessons.find(x=>x.id===b.dataset.toggleGreyWk);
-    if(l){ pushUndo(); l.greyed = !l.greyed; render(); saveDB(); }
-  });
-  c.querySelectorAll('[data-arm-move-lesson]').forEach(b=> b.onclick = (e)=>{
-    e.stopPropagation();
-    const id = b.dataset.armMoveLesson;
-    if(TAP_MOVE && TAP_MOVE.type==='lesson' && TAP_MOVE.lessonId===id){ cancelTapMove(); return; }
-    armLessonMove(id);
-  });
-  c.querySelectorAll('[data-cycle-att]').forEach(dot=> dot.onclick = async (e)=>{
-    e.stopPropagation();
-    const l = DB.lessons.find(x=>x.id===dot.dataset.lesson);
-    if(!l) return;
-    if(l.date > dateKey(new Date())){ toast("Can't mark attendance for a future lesson yet"); return; }
-    pushUndo();
-    const sid = dot.dataset.student;
-    const order = [null,'attended','unattended','skipped'];
-    const cur = l.attendance[sid] || null;
-    const next = order[(order.indexOf(cur)+1)%order.length];
-    l.attendance[sid] = next;
-    render(); saveDB();
-  });
-
-  c.querySelectorAll('[data-drag-student]').forEach(chip=>{
-    chip.ondragstart = (e)=>{
-      DRAG_INFO = {studentId: chip.dataset.dragStudent, lessonId: chip.dataset.dragLesson};
-      e.dataTransfer.effectAllowed = 'move';
-      e.stopPropagation();
-    };
-    chip.addEventListener('click', (e)=>{
-      e.stopPropagation();
-      const studentId = chip.dataset.dragStudent;
-      const srcLessonId = chip.dataset.dragLesson || null;
-      if(TAP_MOVE && TAP_MOVE.type==='student' && TAP_MOVE.studentId===studentId){ cancelTapMove(); return; }
-      armStudentMove(studentId, srcLessonId);
-    });
-  });
-  c.querySelectorAll('[data-lesson-drop]').forEach(card=>{
-    card.ondragover = (e)=>{ e.preventDefault(); card.classList.add('drop-target'); };
-    card.ondragleave = ()=> card.classList.remove('drop-target');
-    card.ondrop = async (e)=>{
-      e.preventDefault(); card.classList.remove('drop-target');
-      const destId = card.dataset.lessonDrop;
-      if(DRAG_LESSON){
-        const lesson = DB.lessons.find(x=>x.id===DRAG_LESSON.lessonId);
-        DRAG_LESSON = null;
-        if(!lesson || lesson.id===destId) return;
-        const dayBody = card.closest('[data-week-add]');
-        if(dayBody){
-          await commitLessonMove(lesson.id, dayBody.dataset.weekAdd, calcSlotStartTime(dayBody, e.clientY));
-        }
-        return;
-      }
-      if(!DRAG_INFO) return;
-      if(destId === DRAG_INFO.lessonId) return;
-      await commitStudentMove(DRAG_INFO.studentId, DRAG_INFO.lessonId, destId);
-      DRAG_INFO = null;
-    };
-    card.addEventListener('click', async (e)=>{
-      if(!TAP_MOVE) return;
-      const destId = card.dataset.lessonDrop;
-      if(TAP_MOVE.type==='student'){
-        e.stopPropagation();
-        const {studentId, srcLessonId} = TAP_MOVE;
-        cancelTapMove();
-        await commitStudentMove(studentId, srcLessonId, destId);
-      } else if(TAP_MOVE.type==='lesson'){
-        e.stopPropagation();
-        if(TAP_MOVE.lessonId===destId){ cancelTapMove(); return; }
-        const dest = DB.lessons.find(x=>x.id===destId);
-        const lessonId = TAP_MOVE.lessonId;
-        cancelTapMove();
-        if(dest) await commitLessonMove(lessonId, dest.date, dest.time);
-      }
-    }, true);
-  });
-
-  c.querySelectorAll('[data-toggle-field]').forEach(t=> t.onclick = ()=>{
-    const id = t.dataset.toggleField;
-    if(REPORT_FIELDS_ON.has(id)) REPORT_FIELDS_ON.delete(id); else REPORT_FIELDS_ON.add(id);
-    render();
-  });
-  c.querySelectorAll('[data-preset]').forEach(b=> b.onclick = ()=>{
-    REPORT_FIELDS_ON = new Set(PRESETS[b.dataset.preset]);
-    render();
-  });
-  c.querySelectorAll('[data-load-view]').forEach(b=> b.onclick = ()=>{
-    const v = DB.views.find(x=>x.name===b.dataset.loadView);
-    if(v) REPORT_FIELDS_ON = new Set(v.fields);
-    render();
-  });
-  c.querySelectorAll('[data-del-view]').forEach(b=> b.onclick = async (e)=>{
-    e.stopPropagation();
-    const viewName = b.dataset.delView;
-    if(await showConfirm(`Delete the custom view "${viewName}"?`, 'Delete', 'Cancel')){
-      DB.views = DB.views.filter(v=>v.name!==viewName);
-      await saveDB();
-      toast('View deleted');
-      render();
-    }
-  });
-  const saveViewBtn = document.getElementById('saveViewBtn');
-  if(saveViewBtn) saveViewBtn.onclick = async ()=>{
-    const nameInput = document.getElementById('viewNameInput');
-    const name = nameInput.value.trim();
-    if(!name){ toast('Name this view first'); return; }
-    DB.views = DB.views.filter(v=>v.name!==name);
-    DB.views.push({name, fields: Array.from(REPORT_FIELDS_ON)});
-    await saveDB();
-    toast('View saved');
-    render();
-  };
-
-  const backBtn = document.getElementById('backToStudents');
-  if(backBtn) backBtn.onclick = ()=> setView(STUDENT_DETAIL_SOURCE_VIEW);
-  c.querySelectorAll('[data-detail-mode]').forEach(b=> b.onclick = ()=>{ STUDENT_DETAIL_MODE = b.dataset.detailMode; render(); });
-  if(CURRENT_VIEW==='studentDetail'){
-    const pm = document.getElementById('prevMonth'), nm = document.getElementById('nextMonth');
-    if(pm) pm.onclick = ()=>{ CAL_DATE = new Date(CAL_DATE.getFullYear(), CAL_DATE.getMonth()-1, 1); render(); };
-    if(nm) nm.onclick = ()=>{ CAL_DATE = new Date(CAL_DATE.getFullYear(), CAL_DATE.getMonth()+1, 1); render(); };
-  }
-}
-
-/* ============================================================
-   BOOT
-   ============================================================ */
-initAuth();
-</script>
-</body>
-</html>
+ 
